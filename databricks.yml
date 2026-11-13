@@ -1,0 +1,21 @@
+bundle:
+  name: dbx-standard-app
+
+variables:
+  app_name:
+    default: dbx-standard-app
+
+resources:
+  apps:
+    dbx-standard-app:
+      name: dbx-standard-app
+      description: A standard Databricks app
+      source_code_path: .
+
+targets:
+  dev:
+    mode: development
+    default: true
+  prod:
+    variables:
+      app_name: dbx-standard-app
