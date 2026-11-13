@@ -18,6 +18,5 @@ targets:
     mode: development
     default: true
   prod:
-    mode: production
     variables:
       app_name: prod-sridderhoff-dbx-std-app
