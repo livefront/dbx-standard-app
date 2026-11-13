@@ -3,12 +3,13 @@ bundle:
 
 variables:
   app_name:
-    default: dbx-standard-app
+    default: dev-sridderhoff-dbx-std-app
+    description: Workspace-global app name (max 30 chars, lowercase/digits/hyphens only)
 
 resources:
   apps:
     dbx-standard-app:
-      name: dbx-standard-app
+      name: ${var.app_name}
       description: A standard Databricks app
       source_code_path: .
 
@@ -18,4 +19,4 @@ targets:
     default: true
   prod:
     variables:
-      app_name: dbx-standard-app
+      app_name: prod-sridderhoff-dbx-std-app
