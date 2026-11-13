@@ -5,6 +5,8 @@ variables:
   app_name:
     default: dev-sridderhoff-dbx-std-app
     description: Workspace-global app name (max 30 chars, lowercase/digits/hyphens only)
+  automation_sp:
+    description: Application ID of the automation service principal
 
 resources:
   apps:
@@ -12,11 +14,49 @@ resources:
       name: ${var.app_name}
       description: A standard Databricks app
       source_code_path: .
+  jobs:
+    stop_dev_app:
+      name: stop-${var.app_name}-nightly
+      tags:
+        aidevkit_project: ai-dev-kit
+      performance_target: STANDARD
+      run_as:
+        service_principal_name: ${var.automation_sp}
+      schedule:
+        quartz_cron_expression: "0 0 19 * * ?"
+        timezone_id: "America/New_York"
+        pause_status: UNPAUSED
+      parameters:
+        - name: app_name
+          default: ${var.app_name}
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "6"
+            dependencies:
+              - databricks-sdk
+      
+      tasks:
+        - task_key: stop_app
+          environment_key: default
+          spark_python_task:
+            python_file: ./client/src/stop_app.py
+            parameters:
+              - "--app-name"
+              - "{{job.parameters.app_name}}"
 
 targets:
   dev:
     mode: development
     default: true
+    variables:
+      automation_sp: "1941c580-cf6c-42ae-9c58-31597c07c200"
+    resources:
+      apps:
+        dbx-standard-app:
+          permissions:
+            - service_principal_name: ${var.automation_sp}
+              level: CAN_MANAGE
   prod:
     variables:
       app_name: prod-sridderhoff-dbx-std-app
