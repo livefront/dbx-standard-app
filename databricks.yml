@@ -17,6 +17,11 @@ resources:
       name: ${var.app_name}
       description: A standard Databricks app
       source_code_path: .
+      resources: 
+        - name: sql-warehouse
+          sql_warehouse:
+            id: ${resources.sql_warehouses.app_warehouse.id}
+            permission: CAN_USE
   schemas:
     raw:
       catalog_name: ${var.catalog_name}
@@ -62,6 +67,18 @@ resources:
       name: events
       catalog_name: ${var.catalog_name}
       schema_name: ${resources.schemas.raw.name}
+  sql_warehouses:
+    app_warehouse:
+      name: dbx-standard-app-warehouse
+      cluster_size: 2X-Small
+      warehouse_type: PRO
+      auto_stop_mins: 5
+      min_num_clusters: 1
+      max_num_clusters: 1
+      enable_serverless_compute: true
+      permissions:
+        - level: CAN_USE
+          service_principal_name: ${resources.apps.dbx-standard-app.service_principal_client_id}
 
 targets:
   dev:
