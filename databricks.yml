@@ -8,6 +8,8 @@ variables:
   automation_sp:
     description: Application ID of the automation service principal (dev only)
     default: "1941c580-cf6c-42ae-9c58-31597c07"
+  catalog_name:
+    default: "sridderhoff_dbx_std_app"
 
 resources:
   apps:
@@ -15,6 +17,24 @@ resources:
       name: ${var.app_name}
       description: A standard Databricks app
       source_code_path: .
+  schemas:
+    raw:
+      catalog_name: ${var.catalog_name}
+      name: raw
+      comment: Raw landing files
+  volumes:
+    customers:
+      name: customers
+      catalog_name: ${var.catalog_name}
+      schema_name: ${resources.schemas.raw.name}
+    tickets:
+      name: tickets
+      catalog_name: ${var.catalog_name}
+      schema_name: ${resources.schemas.raw.name}
+    events:
+      name: events
+      catalog_name: ${var.catalog_name}
+      schema_name: ${resources.schemas.raw.name}
 
 targets:
   dev:
@@ -22,6 +42,7 @@ targets:
     default: true
     variables:
       automation_sp: "1941c580-cf6c-42ae-9c58-31597c07c200"
+      catalog_name: dev_sridderhoff_dbx_std_app
     permissions:
       - group_name: developers
         level: CAN_MANAGE
@@ -51,6 +72,7 @@ targets:
                 environment_version: "6"
                 dependencies:
                   - databricks-sdk
+                  - pandas
           tasks:
             - task_key: stop_app
               environment_key: default
@@ -59,6 +81,25 @@ targets:
                 parameters:
                   - "--app-name"
                   - "{{job.parameters.app_name}}"
+        generate_data:
+          name: generate-raw-data
+          environments:
+            - environment_key: default
+              spec:
+                environment_version: "6"
+                dependencies:
+                  - pandas
+                  - pyarrow
+          tasks:
+            - task_key: generate
+              environment_key: default
+              spark_python_task:
+                python_file: ./jobs/generate_data.py
+                parameters:
+                  - "--catalog"
+                  - "${var.catalog_name}"
+                  - "--schema"
+                  - "${resources.schemas.raw.name}"
 
   prod:
     variables:
