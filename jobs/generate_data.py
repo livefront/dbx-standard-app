@@ -130,7 +130,7 @@ def write_parquet(df, catalog, schema, volume, batch_date):
     volume_root = f"/Volumes/{catalog}/{schema}/{volume}"
     folder = f"{volume_root}/{batch_date}"
     os.makedirs(folder, exist_ok=True)
-    df.to_parquet(f"{folder}/part-0.parquet", index=False)
+    df.to_parquet(f"{folder}/part-0.parquet", index=False, coerce_timestamps="us")
     print(f"Wrote {len(df)} rows to {folder}")
 
     #Make sure we're not keeping the same data on different days
