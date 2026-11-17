@@ -61,9 +61,8 @@ def generate_tickets(customers: pd.DataFrame):
         created = c.signup_date + pd.Timedelta(days=random.randint(0, (TODAY - c.signup_date).days))
         category = random.choice(list(SUBJECTS))
         priority = random.choices(["low", "medium", "high", "urgent"], PRIORITY_WEIGHTS[c.plan_tier])[0]
-
         response = RESPONSE_MINUTES[c.plan_tier] * PRIORITY_FACTOR[priority] * random.uniform(0.5, 1.5)
-        resolved = created + pd.Timedelta(hours=random.uniform(2, 72) * PRIORITY_FACTOR[priority])
+        resolved = (created + pd.Timedelta(hours=random.uniform(2, 72) * PRIORITY_FACTOR[priority])).floor("s")
         is_resolved = resolved < TODAY
 
         tickets.append({
@@ -130,6 +129,9 @@ def write_parquet(df, catalog, schema, volume, batch_date):
     volume_root = f"/Volumes/{catalog}/{schema}/{volume}"
     folder = f"{volume_root}/{batch_date}"
     os.makedirs(folder, exist_ok=True)
+    df = df.copy()
+    for col in df.select_dtypes(include=["datetime"]).columns:
+        df[col] = df[col].dt.tz_localize("UTC")
     df.to_parquet(f"{folder}/part-0.parquet", index=False, coerce_timestamps="us")
     print(f"Wrote {len(df)} rows to {folder}")
 

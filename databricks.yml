@@ -22,6 +22,33 @@ resources:
       catalog_name: ${var.catalog_name}
       name: raw
       comment: Raw landing files
+    bronze:
+      catalog_name: ${var.catalog_name}
+      name: bronze
+      comment: Bronze curated tables
+    silver:
+      catalog_name: ${var.catalog_name}
+      name: silver
+      comment: Silver curated tables
+    gold:
+      catalog_name: ${var.catalog_name}
+      name: gold
+      comment: Gold curated tables
+  pipelines:
+    support_pipeline:
+      name: support-data-pipeline
+      catalog: ${var.catalog_name}
+      schema: ${resources.schemas.bronze.name}
+      serverless: true
+      continuous: false
+      configuration:
+        catalog_name: ${var.catalog_name}
+        raw_schema: ${resources.schemas.raw.name}
+        silver_schema: ${resources.schemas.silver.name}
+        gold_schema: ${resources.schemas.gold.name}
+      libraries:
+        - glob:
+            include: ./pipelines/support/**
   volumes:
     customers:
       name: customers
