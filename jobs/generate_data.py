@@ -11,6 +11,7 @@ All data generated is realted from a SaaS company that provides a product to cus
 
 """
 import argparse
+import numpy as np
 import pandas as pd
 import random
 import os
@@ -18,6 +19,9 @@ import shutil
 
 TODAY = pd.Timestamp.today().normalize()
 SEED = 16
+# Shared seeded generator for pandas sampling. Successive draws advance it, so tickets and
+# events get different (but reproducible) customer sequences. Python's `random` is seeded in main().
+RNG = np.random.default_rng(SEED)
 
 CUSTOMER_DATA = {
     "id": [1,2,3,4,5,6,7,8,9,10],
@@ -55,10 +59,18 @@ def generate_tickets(customers: pd.DataFrame):
     RESPONSE_MINUTES = {"Basic": 240, "Pro": 120, "Enterprise": 30}   # typical first response
     PRIORITY_FACTOR = {"low": 1.5, "medium": 1.0, "high": 0.5, "urgent": 0.25}
 
+    N_TICKETS = 1000
+
+    # Draw every ticket's customer up front (weighted by seats) from a seeded generator:
+    # reproducible across runs, but spread across customers rather than one fixed row.
+    sampled = customers.sample(N_TICKETS, weights=customers.seats, replace=True, random_state=RNG)
+
     tickets = []
-    for i in range(1000):
-        c = customers.sample(1, weights=customers.seats, random_state=SEED).iloc[0]
-        created = c.signup_date + pd.Timedelta(days=random.randint(0, (TODAY - c.signup_date).days))
+    for i, c in enumerate(sampled.itertuples()):
+        # Uniform timestamp (second resolution) between signup and the batch date
+        created = c.signup_date + pd.Timedelta(
+            seconds=random.randint(0, int((TODAY - c.signup_date).total_seconds()))
+        )
         category = random.choice(list(SUBJECTS))
         priority = random.choices(["low", "medium", "high", "urgent"], PRIORITY_WEIGHTS[c.plan_tier])[0]
         response = RESPONSE_MINUTES[c.plan_tier] * PRIORITY_FACTOR[priority] * random.uniform(0.5, 1.5)
@@ -89,7 +101,7 @@ def generate_events(customers: pd.DataFrame, tickets_df: pd.DataFrame):
     FEATURES = ["reports", "dashboards", "data_export", "scheduler", "webhooks"]
 
     # Bigger customers (more seats) generate more events
-    sampled = customers.sample(N_EVENTS, weights=customers.seats, replace=True, random_state=SEED)
+    sampled = customers.sample(N_EVENTS, weights=customers.seats, replace=True, random_state=RNG)
 
     events = []
     for c in sampled.itertuples():
@@ -111,9 +123,10 @@ def generate_events(customers: pd.DataFrame, tickets_df: pd.DataFrame):
     # Link to tickets: errors show up 1-3 hours before bug / integration tickets
     for t in tickets_df[tickets_df.category.isin(["bug", "integration"])].itertuples():
         for _ in range(3):
+            lead = pd.Timedelta(seconds=random.randint(3600, 3 * 3600))
             events.append({
                 "customer_id": t.customer_id,
-                "event_ts": max(ts, signup[t.customer_id]),
+                "event_ts": max(t.created_at - lead, signup[t.customer_id]),
                 "event_type": "error",
                 "feature_name": None,
                 "status_code": 500,

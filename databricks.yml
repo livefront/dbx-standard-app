@@ -7,7 +7,7 @@ variables:
     default: dev-sridderhoff-dbx-std-app
   automation_sp:
     description: Application ID of the automation service principal (dev only)
-    default: "1941c580-cf6c-42ae-9c58-31597c07"
+    default: "1941c580-cf6c-42ae-9c58-31597c07c200"
   catalog_name:
     default: "sridderhoff_dbx_std_app"
 
