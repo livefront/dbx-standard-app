@@ -6,6 +6,7 @@ SELECT
   , resolved_at
   , category
   , subject
+  , description
   , priority
   , status
   , first_response_minutes

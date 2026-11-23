@@ -40,26 +40,99 @@ def generate_customers():
     """Generate a DataFrame of customers."""
     return pd.DataFrame(CUSTOMER_DATA)
 
-def generate_tickets(customers: pd.DataFrame):
-    """Generate a DataFrame of support tickets based on the customers."""
-    SUBJECTS = {
-        "billing": "Question about my invoice",
-        "bug": "Something is not working",
-        "integration": "API returns errors",
-        "access": "Cannot log in",
-        "how-to": "How do I export a report?",
-    }
+PRIORITIES = ["low", "medium", "high", "urgent"]
+FEATURES = ["reports", "dashboards", "data_export", "scheduler", "webhooks"]
 
-    # Higher tier -> more serious tickets and faster responses
-    PRIORITY_WEIGHTS = {            # low, medium, high, urgent
-        "Basic":      [50, 40, 9, 1],
-        "Pro":        [30, 40, 25, 5],
-        "Enterprise": [10, 30, 40, 20],
+# Ticket text by category: (subject, description template). Templates may use {feature},
+# {code}, and {errors_clause}. A customer-impact sentence matching the priority is appended.
+TICKET_TEXT = {
+    "billing": [
+        ("Question about my invoice", "Our latest invoice shows a different amount than we expected. Can you walk us through the charges?"),
+        ("Charged for unused seats", "We were billed for more seats than we have active users. Please review our seat count and adjust the invoice."),
+        ("Update billing contact", "Our finance contact has changed and invoices are going to the wrong person. How do we update the billing details?"),
+    ],
+    "bug": [
+        ("Something is not working", "The {feature} page stopped loading correctly for several of our users.{errors_clause}"),
+        ("{feature} shows wrong numbers", "Totals in {feature} do not match our source data after the last refresh.{errors_clause}"),
+        ("Page crashes on save", "Saving changes in {feature} fails with an error message and the changes are lost.{errors_clause}"),
+    ],
+    "integration": [
+        ("API returns errors", "Calls to the API are failing with HTTP {code}.{errors_clause}"),
+        ("Webhook deliveries failing", "Our endpoint is no longer receiving webhook events and the delivery log shows HTTP {code}.{errors_clause}"),
+        ("Sync job timing out", "Our scheduled data sync through the API is timing out partway through.{errors_clause}"),
+    ],
+    "access": [
+        ("Cannot log in", "Several users get an authentication error when they try to sign in."),
+        ("SSO login loop", "After signing in with SSO, users are redirected back to the login page."),
+        ("New user cannot access workspace", "A new team member was invited but cannot see any of our workspace content."),
+    ],
+    "how-to": [
+        ("How do I export a report?", "We need to share {feature} results with leadership. What is the best way to export them?"),
+        ("Setting up scheduled emails", "Can {feature} results be emailed to our team on a schedule?"),
+        ("Best practice for permissions", "What is the recommended way to manage access to {feature} for different teams?"),
+    ],
+}
+IMPACT_TEXT = {
+    "low": "No rush, whenever you have a chance.",
+    "medium": "We would like to get this resolved this week.",
+    "high": "This is slowing our team down significantly.",
+    "urgent": "This is blocking our production workflows right now.",
+}
+
+
+def pick_priority(plan_tier: str, category: str, errors_before: int) -> str:
+    """Priority depends on plan tier, ticket category, and preceding product errors, plus chance."""
+    TIER_WEIGHTS = {                # low, medium, high, urgent
+        "Basic":      [50, 35, 12, 3],
+        "Pro":        [30, 40, 22, 8],
+        "Enterprise": [15, 30, 35, 20],
     }
+    CATEGORY_MULT = {
+        "how-to":      [2.5, 1.2, 0.3, 0.1],
+        "billing":     [1.5, 1.3, 0.6, 0.2],
+        "access":      [0.5, 0.9, 1.5, 2.0],
+        "bug":         [0.8, 1.0, 1.3, 1.2],
+        "integration": [0.7, 1.0, 1.3, 1.5],
+    }
+    if errors_before >= 5:
+        error_mult = [0.2, 0.6, 1.8, 3.0]
+    elif errors_before >= 2:
+        error_mult = [0.5, 0.9, 1.4, 1.6]
+    else:
+        error_mult = [1.0, 1.0, 1.0, 1.0]
+    weights = [t * c * e for t, c, e in zip(TIER_WEIGHTS[plan_tier], CATEGORY_MULT[category], error_mult)]
+    return random.choices(PRIORITIES, weights)[0]
+
+
+def ticket_text(category: str, priority: str, errors_before: int) -> tuple[str, str]:
+    subject, template = random.choice(TICKET_TEXT[category])
+    feature = random.choice(FEATURES)
+    code = random.choice([500, 502, 503, 504])
+    errors_clause = (
+        " We noticed a burst of errors in the hours before we opened this ticket."
+        if errors_before >= 2 else ""
+    )
+    # Customers usually describe impact in line with the real priority, but not always.
+    if random.random() < 0.75:
+        impact = IMPACT_TEXT[priority]
+    else:
+        impact = IMPACT_TEXT[random.choice(PRIORITIES)]
+    description = template.format(feature=feature, code=code, errors_clause=errors_clause) + " " + impact
+    return subject.format(feature=feature.replace("_", " ").capitalize()), description
+
+
+def generate_tickets(customers: pd.DataFrame):
+    """Generate a DataFrame of support tickets based on the customers.
+
+    Includes a helper column `planned_errors_before` (planned error events in the hours before the ticket),
+    used by generate_events and dropped before writing.
+    """
     RESPONSE_MINUTES = {"Basic": 240, "Pro": 120, "Enterprise": 30}   # typical first response
     PRIORITY_FACTOR = {"low": 1.5, "medium": 1.0, "high": 0.5, "urgent": 0.25}
+    # Chance that a ticket is still open, by age in days (keeps a realistic live queue)
+    OPEN_PROBABILITY = [(3, 0.8), (7, 0.6), (14, 0.35), (30, 0.1)]
 
-    N_TICKETS = 1000
+    N_TICKETS = 1500
 
     # Draw every ticket's customer up front (weighted by seats) from a seeded generator:
     # reproducible across runs, but spread across customers rather than one fixed row.
@@ -71,11 +144,22 @@ def generate_tickets(customers: pd.DataFrame):
         created = c.signup_date + pd.Timedelta(
             seconds=random.randint(0, int((TODAY - c.signup_date).total_seconds()))
         )
-        category = random.choice(list(SUBJECTS))
-        priority = random.choices(["low", "medium", "high", "urgent"], PRIORITY_WEIGHTS[c.plan_tier])[0]
+        category = random.choice(list(TICKET_TEXT))
+
+        # Bug and integration tickets are usually preceded by a burst of product errors
+        if category in ("bug", "integration"):
+            errors_before = random.randint(2, 8) if random.random() < 0.7 else 0
+        else:
+            errors_before = random.randint(1, 2) if random.random() < 0.1 else 0
+
+        priority = pick_priority(c.plan_tier, category, errors_before)
+        subject, description = ticket_text(category, priority, errors_before)
         response = RESPONSE_MINUTES[c.plan_tier] * PRIORITY_FACTOR[priority] * random.uniform(0.5, 1.5)
         resolved = (created + pd.Timedelta(hours=random.uniform(2, 72) * PRIORITY_FACTOR[priority])).floor("s")
-        is_resolved = resolved < TODAY
+
+        age_days = (TODAY - created).total_seconds() / 86400
+        open_p = next((p for max_age, p in OPEN_PROBABILITY if age_days < max_age), 0.0)
+        is_resolved = resolved < TODAY and random.random() >= open_p
 
         tickets.append({
             "ticket_id": 100001 + i,
@@ -83,10 +167,12 @@ def generate_tickets(customers: pd.DataFrame):
             "created_at": created,
             "resolved_at": resolved if is_resolved else pd.NaT,
             "category": category,
-            "subject": SUBJECTS[category],
+            "subject": subject,
+            "description": description,
             "priority": priority,
             "status": "resolved" if is_resolved else "open",
             "first_response_minutes": round(response),
+            "planned_errors_before": errors_before,
         })
 
     tickets_df = pd.DataFrame(tickets)
@@ -98,7 +184,6 @@ def generate_events(customers: pd.DataFrame, tickets_df: pd.DataFrame):
 
     EVENT_TYPES = ["login", "api_call", "feature_used", "error"]
     EVENT_WEIGHTS = [30, 45, 20, 5]
-    FEATURES = ["reports", "dashboards", "data_export", "scheduler", "webhooks"]
 
     # Bigger customers (more seats) generate more events
     sampled = customers.sample(N_EVENTS, weights=customers.seats, replace=True, random_state=RNG)
@@ -120,9 +205,9 @@ def generate_events(customers: pd.DataFrame, tickets_df: pd.DataFrame):
             "latency_ms": random.randint(80, 400) if etype == "api_call" else None,
         })
     signup = customers.set_index("id").signup_date
-    # Link to tickets: errors show up 1-3 hours before bug / integration tickets
-    for t in tickets_df[tickets_df.category.isin(["bug", "integration"])].itertuples():
-        for _ in range(3):
+    # Link to tickets: each ticket's planned error burst lands 1-3 hours before it was opened
+    for t in tickets_df[tickets_df.planned_errors_before > 0].itertuples():
+        for _ in range(t.planned_errors_before):
             lead = pd.Timedelta(seconds=random.randint(3600, 3 * 3600))
             events.append({
                 "customer_id": t.customer_id,
@@ -168,7 +253,7 @@ def main():
     events_df = generate_events(customers_df, tickets_df)
 
     write_parquet(customers_df, args.catalog, args.schema, "customers", args.batch_date)
-    write_parquet(tickets_df, args.catalog, args.schema, "tickets", args.batch_date)
+    write_parquet(tickets_df.drop(columns=["planned_errors_before"]), args.catalog, args.schema, "tickets", args.batch_date)
     write_parquet(events_df, args.catalog, args.schema, "events", args.batch_date)
 
 if __name__ == "__main__":
