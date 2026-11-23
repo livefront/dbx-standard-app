@@ -1,5 +1,23 @@
-CREATE OR REFRESH MATERIALIZED VIEW ${gold_schema}.gold_customer_features AS
-SELECT
+CREATE OR REFRESH MATERIALIZED VIEW ${gold_schema}.gold_customer_features (
+  customer_id BIGINT COMMENT 'Customer identifier. Joins to gold_ticket_facts and gold_customer_daily_activity.',
+  company_name STRING COMMENT 'Customer company name.',
+  plan_tier STRING COMMENT 'Subscription plan: Basic, Pro, or Enterprise. Higher tiers have stricter response-time SLAs.',
+  region STRING COMMENT 'Customer region: NA-East, NA-West, NA-Central, EU, or APAC.',
+  industry STRING COMMENT 'Customer industry.',
+  seats BIGINT COMMENT 'Number of licensed seats (users) on the account.',
+  mrr BIGINT COMMENT 'Monthly recurring revenue in USD.',
+  account_age_days INT COMMENT 'Days since the customer signed up, as of the last pipeline refresh.',
+  tickets_total BIGINT COMMENT 'All-time number of support tickets opened by the customer.',
+  tickets_30d BIGINT COMMENT 'Tickets opened in the 30 days before the last pipeline refresh.',
+  urgent_tickets_30d BIGINT COMMENT 'Urgent-priority tickets opened in the 30 days before the last pipeline refresh.',
+  open_tickets BIGINT COMMENT 'Tickets currently open (not yet resolved) for the customer.',
+  avg_first_response_minutes DOUBLE COMMENT 'All-time average minutes until the first support response.',
+  avg_resolution_hours DECIMAL(24,1) COMMENT 'All-time average hours from ticket creation to resolution, resolved tickets only.',
+  events_7d BIGINT COMMENT 'Product events in the 7 days before the last pipeline refresh.',
+  errors_7d BIGINT COMMENT 'Error events in the 7 days before the last pipeline refresh.'
+)
+COMMENT 'One row per customer with account attributes plus support and product-health metrics. Use for customer-level questions such as backlog, revenue exposure, and overall account health.'
+AS SELECT
   c.customer_id,
   c.company_name,
   c.plan_tier,

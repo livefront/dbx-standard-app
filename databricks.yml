@@ -1,6 +1,9 @@
 bundle:
   name: dbx-standard-app
 
+include:
+  - resources/*.yml
+
 variables:
   app_name:
     description: Workspace-global app name (max 30 chars, lowercase/digits/hyphens only)
@@ -79,19 +82,7 @@ resources:
       permissions:
         - level: CAN_USE
           service_principal_name: ${resources.apps.dbx-standard-app.service_principal_client_id}
-  genie_spaces:
-    support_analytics:
-      title: Support Analytics
-      description: Ticket and customer analytics for the support team
-      warehouse_id: ${resources.sql_warehouses.app_warehouse.id}
-      parent_path: /Workspace/Users/${workspace.current_user.userName}/genie_spaces
-      serialized_space:
-        version: 2
-        data_sources:
-          tables:
-            - identifier: ${var.catalog_name}.${resources.schemas.gold.name}.gold_customer_daily_activity
-            - identifier: ${var.catalog_name}.${resources.schemas.gold.name}.gold_customer_features
-            - identifier: ${var.catalog_name}.${resources.schemas.gold.name}.gold_ticket_facts
+
 targets:
   dev:
     mode: development

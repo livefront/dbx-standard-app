@@ -1,0 +1,286 @@
+# Genie space for the support team.
+#
+# This file is the source of truth for the space: edits made in the Genie UI are overwritten
+# on the next `bundle deploy`. Prototype in the UI, then port changes here.
+#
+# serialized_space rules (enforced by the Genie API):
+#   - every id is 32 lowercase hex chars, unique across instructions and questions
+#   - id-keyed lists are sorted by id, tables by identifier, column_configs by column_name
+#   - SQL in sql_snippets / join_specs must qualify columns with the table name
+# ID prefixes used here: 01 sample questions, 02 example SQL, 03 text instructions,
+# 04 join specs, 05 measures, 06 filters, 07 expressions.
+#
+# Business context (column meaning, grain) lives in the gold table COMMENTs in
+# pipelines/support/gold_*.sql; Genie reads those from Unity Catalog. This file adds
+# Genie-only context: synonyms, value matching, joins, definitions, and examples.
+
+variables:
+  sla_target_minutes_sql:
+    description: >-
+      First-response SLA target in minutes by plan tier and ticket priority, as a SQL
+      expression over gold_ticket_facts. Single definition reused by the Genie snippets.
+      Basic 450/300/150/75, Pro 225/150/75/38, Enterprise 56/38/19/9 (low/medium/high/urgent).
+    default: >-
+      CASE gold_ticket_facts.plan_tier
+      WHEN 'Basic' THEN CASE gold_ticket_facts.priority WHEN 'low' THEN 450 WHEN 'medium' THEN 300 WHEN 'high' THEN 150 WHEN 'urgent' THEN 75 END
+      WHEN 'Pro' THEN CASE gold_ticket_facts.priority WHEN 'low' THEN 225 WHEN 'medium' THEN 150 WHEN 'high' THEN 75 WHEN 'urgent' THEN 38 END
+      WHEN 'Enterprise' THEN CASE gold_ticket_facts.priority WHEN 'low' THEN 56 WHEN 'medium' THEN 38 WHEN 'high' THEN 19 WHEN 'urgent' THEN 9 END
+      END
+
+resources:
+  genie_spaces:
+    support_analytics:
+      title: Support Analytics
+      description: >-
+        Assistant for the support team: ticket queues, response-time SLA performance,
+        and customer health (including rising product error trends) across all customers.
+      warehouse_id: ${resources.sql_warehouses.app_warehouse.id}
+      parent_path: /Workspace/Users/${workspace.current_user.userName}/genie_spaces
+      serialized_space:
+        version: 2
+
+        config:
+          sample_questions:
+            - id: "01000000000000000000000000000001"
+              question: ["Which open tickets are breaching SLA right now?"]
+            - id: "01000000000000000000000000000002"
+              question: ["What is our SLA breach rate by plan tier and priority over the last 30 days?"]
+            - id: "01000000000000000000000000000003"
+              question: ["Which customers have a rising error trend?"]
+            - id: "01000000000000000000000000000004"
+              question: ["Which Enterprise customers have open urgent tickets?"]
+            - id: "01000000000000000000000000000005"
+              question: ["How has weekly ticket volume and first response time trended?"]
+
+        data_sources:
+          tables:
+            - identifier: ${var.catalog_name}.${resources.schemas.gold.name}.gold_customer_daily_activity
+              column_configs:
+                - column_name: company_name
+                  synonyms: ["customer", "account", "company"]
+                  enable_format_assistance: true
+                  enable_entity_matching: true
+                - column_name: errors
+                  synonyms: ["failures", "error count", "5xx"]
+                - column_name: event_date
+                  synonyms: ["day", "activity date"]
+                - column_name: industry
+                  enable_format_assistance: true
+                  enable_entity_matching: true
+                - column_name: plan_tier
+                  synonyms: ["tier", "plan", "subscription"]
+                  enable_format_assistance: true
+                  enable_entity_matching: true
+                - column_name: region
+                  enable_format_assistance: true
+                  enable_entity_matching: true
+
+            - identifier: ${var.catalog_name}.${resources.schemas.gold.name}.gold_customer_features
+              column_configs:
+                - column_name: company_name
+                  synonyms: ["customer", "account", "company"]
+                  enable_format_assistance: true
+                  enable_entity_matching: true
+                - column_name: industry
+                  enable_format_assistance: true
+                  enable_entity_matching: true
+                - column_name: mrr
+                  synonyms: ["revenue", "monthly recurring revenue", "account value"]
+                - column_name: open_tickets
+                  synonyms: ["backlog", "open queue"]
+                - column_name: plan_tier
+                  synonyms: ["tier", "plan", "subscription"]
+                  enable_format_assistance: true
+                  enable_entity_matching: true
+                - column_name: region
+                  enable_format_assistance: true
+                  enable_entity_matching: true
+                - column_name: seats
+                  synonyms: ["licenses", "users"]
+
+            - identifier: ${var.catalog_name}.${resources.schemas.gold.name}.gold_ticket_facts
+              column_configs:
+                - column_name: category
+                  synonyms: ["ticket type", "issue type"]
+                  enable_format_assistance: true
+                  enable_entity_matching: true
+                - column_name: company_name
+                  synonyms: ["customer", "account", "company"]
+                  enable_format_assistance: true
+                  enable_entity_matching: true
+                - column_name: errors_24h_before
+                  synonyms: ["preceding errors", "error spike before ticket"]
+                - column_name: first_response_minutes
+                  synonyms: ["response time", "time to first response", "FRT"]
+                - column_name: industry
+                  enable_format_assistance: true
+                  enable_entity_matching: true
+                - column_name: plan_tier
+                  synonyms: ["tier", "plan", "subscription"]
+                  enable_format_assistance: true
+                  enable_entity_matching: true
+                - column_name: priority
+                  synonyms: ["severity", "urgency"]
+                  enable_format_assistance: true
+                  enable_entity_matching: true
+                - column_name: region
+                  enable_format_assistance: true
+                  enable_entity_matching: true
+                - column_name: resolution_hours
+                  synonyms: ["resolution time", "time to resolve"]
+                - column_name: status
+                  synonyms: ["state"]
+                  enable_format_assistance: true
+                  enable_entity_matching: true
+
+        instructions:
+          text_instructions:
+            - id: "03000000000000000000000000000001"
+              content:
+                - |
+                  ## PURPOSE
+                  - Users are the dedicated support team that triages and manages customer tickets. Answer in operational terms: queues, priorities, SLAs, and which customers need attention.
+
+                  ## DISAMBIGUATION
+                  - When no time range is given for ticket questions, use the last 30 days and say so.
+                  - Measure "last N days" from the most recent date in the data (latest created_date or event_date), not the calendar date.
+                  - "Response time" means first_response_minutes. "Resolution time" means resolution_hours, resolved tickets only.
+                  - "SLA", "breach", or "on time" refer to the first-response SLA target, which depends on both plan tier and priority. Use the SLA target and SLA breached definitions.
+                  - "At risk" or "rising errors" means a customer whose errors in the last 7 days exceed their errors in the previous 7 days, from gold_customer_daily_activity.
+
+                  ## DATA QUALITY NOTES
+                  - resolved_at and resolution_hours are null for open tickets.
+                  - The _30d and _7d columns in gold_customer_features are relative to the last pipeline refresh; for exact windows, compute from gold_ticket_facts or gold_customer_daily_activity.
+
+                  ## Instructions you must follow when providing summaries
+                  - Lead with the direct answer in one sentence, then the key numbers.
+                  - State the date range and any filters used.
+                  - Call out SLA breaches, open urgent tickets, and affected Enterprise customers when present.
+                  - Always finish every answer with a final line that starts with "**Next step:**" and names one concrete action for the support team, such as which ticket to prioritize, which customer to contact, or what to investigate. Base it on the results.
+                  - Do not list follow-up questions in the answer; they are suggested separately.
+
+          example_question_sqls:
+            - id: "02000000000000000000000000000001"
+              question: ["Which open tickets are breaching SLA?"]
+              usage_guidance: ["Use for the live queue of open tickets that have missed their first-response SLA target, most severe first."]
+              sql:
+                - >-
+                  SELECT gold_ticket_facts.ticket_id, gold_ticket_facts.company_name, gold_ticket_facts.plan_tier,
+                  gold_ticket_facts.priority, gold_ticket_facts.category, gold_ticket_facts.created_at,
+                  gold_ticket_facts.first_response_minutes, ${var.sla_target_minutes_sql} AS sla_target_minutes
+                  FROM ${var.catalog_name}.${resources.schemas.gold.name}.gold_ticket_facts
+                  WHERE gold_ticket_facts.status = 'open'
+                  AND gold_ticket_facts.first_response_minutes > ${var.sla_target_minutes_sql}
+                  ORDER BY CASE gold_ticket_facts.priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END,
+                  gold_ticket_facts.created_at
+            - id: "02000000000000000000000000000002"
+              question: ["What is the SLA breach rate by plan tier and priority over the last 30 days?"]
+              usage_guidance: ["Use for SLA performance breakdowns. The 30-day window is anchored to the latest created_date in the data."]
+              sql:
+                - >-
+                  SELECT gold_ticket_facts.plan_tier, gold_ticket_facts.priority, COUNT(*) AS tickets,
+                  COUNT_IF(gold_ticket_facts.first_response_minutes > ${var.sla_target_minutes_sql}) AS sla_breaches,
+                  ROUND(100.0 * AVG(CASE WHEN gold_ticket_facts.first_response_minutes > ${var.sla_target_minutes_sql} THEN 1 ELSE 0 END), 1) AS sla_breach_rate_pct
+                  FROM ${var.catalog_name}.${resources.schemas.gold.name}.gold_ticket_facts
+                  WHERE gold_ticket_facts.created_date > (SELECT MAX(created_date) - INTERVAL 30 DAYS FROM ${var.catalog_name}.${resources.schemas.gold.name}.gold_ticket_facts)
+                  GROUP BY gold_ticket_facts.plan_tier, gold_ticket_facts.priority
+                  ORDER BY gold_ticket_facts.plan_tier, sla_breach_rate_pct DESC
+            - id: "02000000000000000000000000000003"
+              question: ["Which customers have a rising error trend?"]
+              usage_guidance: ["Use for at-risk customers: errors in the last 7 days compared with the previous 7 days, anchored to the latest event_date."]
+              sql:
+                - >-
+                  WITH latest AS (SELECT MAX(event_date) AS d FROM ${var.catalog_name}.${resources.schemas.gold.name}.gold_customer_daily_activity),
+                  windows AS (
+                  SELECT a.customer_id, a.company_name, a.plan_tier,
+                  SUM(CASE WHEN a.event_date > l.d - INTERVAL 7 DAYS THEN a.errors ELSE 0 END) AS errors_last_7d,
+                  SUM(CASE WHEN a.event_date <= l.d - INTERVAL 7 DAYS THEN a.errors ELSE 0 END) AS errors_prior_7d
+                  FROM ${var.catalog_name}.${resources.schemas.gold.name}.gold_customer_daily_activity a CROSS JOIN latest l
+                  WHERE a.event_date > l.d - INTERVAL 14 DAYS
+                  GROUP BY a.customer_id, a.company_name, a.plan_tier)
+                  SELECT customer_id, company_name, plan_tier, errors_last_7d, errors_prior_7d,
+                  errors_last_7d - errors_prior_7d AS error_change
+                  FROM windows WHERE errors_last_7d > errors_prior_7d
+                  ORDER BY error_change DESC
+            - id: "02000000000000000000000000000004"
+              question: ["Which bug or integration tickets were preceded by an error spike?"]
+              usage_guidance: ["Use for root-cause questions linking product errors to tickets."]
+              sql:
+                - >-
+                  SELECT gold_ticket_facts.ticket_id, gold_ticket_facts.company_name, gold_ticket_facts.category,
+                  gold_ticket_facts.priority, gold_ticket_facts.created_at, gold_ticket_facts.errors_24h_before
+                  FROM ${var.catalog_name}.${resources.schemas.gold.name}.gold_ticket_facts
+                  WHERE gold_ticket_facts.category IN ('bug', 'integration') AND gold_ticket_facts.errors_24h_before >= 3
+                  ORDER BY gold_ticket_facts.errors_24h_before DESC, gold_ticket_facts.created_at DESC
+            - id: "02000000000000000000000000000005"
+              question: ["How have weekly ticket volume, first response time, and SLA breach rate trended?"]
+              usage_guidance: ["Use for week-over-week support performance trends over the last 12 weeks of data."]
+              sql:
+                - >-
+                  SELECT date_trunc('WEEK', gold_ticket_facts.created_at) AS week_start, COUNT(*) AS tickets,
+                  ROUND(AVG(gold_ticket_facts.first_response_minutes), 1) AS avg_first_response_minutes,
+                  ROUND(100.0 * AVG(CASE WHEN gold_ticket_facts.first_response_minutes > ${var.sla_target_minutes_sql} THEN 1 ELSE 0 END), 1) AS sla_breach_rate_pct
+                  FROM ${var.catalog_name}.${resources.schemas.gold.name}.gold_ticket_facts
+                  WHERE gold_ticket_facts.created_date > (SELECT MAX(created_date) - INTERVAL 12 WEEKS FROM ${var.catalog_name}.${resources.schemas.gold.name}.gold_ticket_facts)
+                  GROUP BY week_start
+                  ORDER BY week_start
+
+          join_specs:
+            - id: "04000000000000000000000000000001"
+              left:
+                identifier: ${var.catalog_name}.${resources.schemas.gold.name}.gold_ticket_facts
+                alias: gold_ticket_facts
+              right:
+                identifier: ${var.catalog_name}.${resources.schemas.gold.name}.gold_customer_features
+                alias: gold_customer_features
+              sql:
+                - "`gold_ticket_facts`.`customer_id` = `gold_customer_features`.`customer_id`"
+                - "--rt=FROM_RELATIONSHIP_TYPE_MANY_TO_ONE--"
+            - id: "04000000000000000000000000000002"
+              left:
+                identifier: ${var.catalog_name}.${resources.schemas.gold.name}.gold_customer_daily_activity
+                alias: gold_customer_daily_activity
+              right:
+                identifier: ${var.catalog_name}.${resources.schemas.gold.name}.gold_customer_features
+                alias: gold_customer_features
+              sql:
+                - "`gold_customer_daily_activity`.`customer_id` = `gold_customer_features`.`customer_id`"
+                - "--rt=FROM_RELATIONSHIP_TYPE_MANY_TO_ONE--"
+
+          sql_snippets:
+            measures:
+              - id: "05000000000000000000000000000001"
+                alias: sla_breach_rate_pct
+                display_name: SLA breach rate (%)
+                synonyms: ["SLA miss rate", "percent breached", "SLA compliance"]
+                sql:
+                  - "ROUND(100.0 * AVG(CASE WHEN gold_ticket_facts.first_response_minutes > ${var.sla_target_minutes_sql} THEN 1 ELSE 0 END), 1)"
+              - id: "05000000000000000000000000000002"
+                alias: error_rate_pct
+                display_name: Error rate (%)
+                synonyms: ["failure rate"]
+                sql:
+                  - "ROUND(100.0 * SUM(gold_customer_daily_activity.errors) / NULLIF(SUM(gold_customer_daily_activity.events), 0), 2)"
+            filters:
+              - id: "06000000000000000000000000000001"
+                display_name: SLA breached
+                synonyms: ["missed SLA", "late response", "out of SLA"]
+                sql:
+                  - "gold_ticket_facts.first_response_minutes > ${var.sla_target_minutes_sql}"
+              - id: "06000000000000000000000000000002"
+                display_name: Open tickets
+                synonyms: ["unresolved", "backlog", "in the queue"]
+                sql:
+                  - "gold_ticket_facts.status = 'open'"
+              - id: "06000000000000000000000000000003"
+                display_name: Open urgent tickets
+                synonyms: ["urgent backlog", "open P1s"]
+                sql:
+                  - "gold_ticket_facts.status = 'open' AND gold_ticket_facts.priority = 'urgent'"
+            expressions:
+              - id: "07000000000000000000000000000001"
+                alias: sla_target_minutes
+                display_name: SLA target (minutes)
+                synonyms: ["SLA", "response target", "SLA threshold"]
+                sql:
+                  - "${var.sla_target_minutes_sql}"
