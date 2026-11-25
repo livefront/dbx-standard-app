@@ -1,0 +1,50 @@
+# Lakebase (Postgres) for the app.
+#
+# Layout: ONE Lakebase project shared by all targets, one branch per target.
+#   prod -> `production` branch (created with the project)
+#   dev  -> `dev` branch, copy-on-write from production
+# The project, the dev branch and its compute are declared in the dev target in
+# databricks.yml (a bundle resource can only be owned by one target's state).
+#
+# Postgres schemas on each branch:
+#   <synced schema>  read-only copies of gold tables (this file). Named after the
+#                    UC schema below, so it is `synced` in prod and
+#                    `dev_<user>_synced` in dev; the app gets it via SYNCED_SCHEMA.
+#   app              app-owned tables, created by migrations in server/db/.
+
+variables:
+  lakebase_project_id:
+    description: Lakebase project shared by all targets
+    default: dbx-std-app
+  lakebase_branch_id:
+    description: Lakebase branch this target's app and synced tables use
+    default: production
+
+resources:
+  schemas:
+    synced:
+      catalog_name: ${var.catalog_name}
+      name: synced
+      comment: >-
+        Lakebase synced tables (UC entries for Postgres copies of gold tables).
+        Managed by the sync pipelines; do not write to these.
+
+  # Gold tables are materialized views, so SNAPSHOT mode (full copy, no CDF needed).
+  # Re-run a snapshot after the support pipeline refreshes gold.
+  postgres_synced_tables:
+    ticket_facts:
+      synced_table_id: ${var.catalog_name}.${resources.schemas.synced.name}.ticket_facts
+      source_table_full_name: ${var.catalog_name}.${resources.schemas.gold.name}.gold_ticket_facts
+      primary_key_columns: [ticket_id]
+      scheduling_policy: SNAPSHOT
+      branch: projects/${var.lakebase_project_id}/branches/${var.lakebase_branch_id}
+      postgres_database: databricks_postgres
+      create_database_objects_if_missing: true
+    customer_features:
+      synced_table_id: ${var.catalog_name}.${resources.schemas.synced.name}.customer_features
+      source_table_full_name: ${var.catalog_name}.${resources.schemas.gold.name}.gold_customer_features
+      primary_key_columns: [customer_id]
+      scheduling_policy: SNAPSHOT
+      branch: projects/${var.lakebase_project_id}/branches/${var.lakebase_branch_id}
+      postgres_database: databricks_postgres
+      create_database_objects_if_missing: true

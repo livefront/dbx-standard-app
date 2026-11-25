@@ -20,11 +20,23 @@ resources:
       name: ${var.app_name}
       description: A standard Databricks app
       source_code_path: .
-      resources: 
+      config:
+        command: ["npm", "run", "start"]
+        env:
+          - name: LAKEBASE_ENDPOINT
+            value_from: postgres
+          - name: SYNCED_SCHEMA
+            value: ${resources.schemas.synced.name}
+      resources:
         - name: sql-warehouse
           sql_warehouse:
             id: ${resources.sql_warehouses.app_warehouse.id}
             permission: CAN_USE
+        - name: postgres
+          postgres:
+            branch: projects/${var.lakebase_project_id}/branches/${var.lakebase_branch_id}
+            database: projects/${var.lakebase_project_id}/branches/${var.lakebase_branch_id}/databases/databricks-postgres
+            permission: CAN_CONNECT_AND_CREATE
   schemas:
     raw:
       catalog_name: ${var.catalog_name}
@@ -90,6 +102,7 @@ targets:
     variables:
       automation_sp: "1941c580-cf6c-42ae-9c58-31597c07c200"
       catalog_name: dev_sridderhoff_dbx_std_app
+      lakebase_branch_id: dev
     permissions:
       - group_name: developers
         level: CAN_MANAGE
@@ -98,6 +111,50 @@ targets:
       - user_name: ${workspace.current_user.userName}
         level: CAN_MANAGE
     resources:
+      # The shared Lakebase project is owned by this target's state (see
+      # resources/lakebase.yml). prevent_destroy keeps `bundle destroy -t dev`
+      # from deleting the production branch along with it.
+      postgres_projects:
+        app_db:
+          project_id: ${var.lakebase_project_id}
+          display_name: dbx-standard-app
+          pg_version: 17
+          default_endpoint_settings:
+            autoscaling_limit_min_cu: 0.5
+            autoscaling_limit_max_cu: 2
+          lifecycle:
+            prevent_destroy: true
+      postgres_branches:
+        # Created automatically with the project; adopted here so it can be protected
+        # (no delete/reset) and so both branches are declared in one place.
+        production:
+          branch_id: production
+          parent: ${resources.postgres_projects.app_db.name}
+          is_protected: true
+          no_expiry: true
+          replace_existing: true
+        dev:
+          branch_id: ${var.lakebase_branch_id}
+          parent: ${resources.postgres_projects.app_db.name}
+          source_branch: ${resources.postgres_projects.app_db.name}/branches/production
+          no_expiry: true
+      postgres_endpoints:
+        # Each branch auto-creates its read-write `primary` compute; adopt them here
+        # so their size is managed by the bundle.
+        production_primary:
+          endpoint_id: primary
+          replace_existing: true
+          parent: ${resources.postgres_branches.production.name}
+          endpoint_type: ENDPOINT_TYPE_READ_WRITE
+          autoscaling_limit_min_cu: 0.5
+          autoscaling_limit_max_cu: 2
+        dev_primary:
+          endpoint_id: primary
+          replace_existing: true
+          parent: ${resources.postgres_branches.dev.name}
+          endpoint_type: ENDPOINT_TYPE_READ_WRITE
+          autoscaling_limit_min_cu: 0.5
+          autoscaling_limit_max_cu: 2
       jobs:
         stop_dev_app:
           name: stop-${var.app_name}-nightly
